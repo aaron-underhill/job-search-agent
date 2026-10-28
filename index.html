@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Search Agent · Demo</title>
+<meta name="description" content="Demo of an AI agent pipeline that searches for jobs every hour, scores how likely the applicant is to get each one, tailors resumes and tracks applications.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87,500;87,650;100,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: a working board. Sticky header with tabs; one column of job cards (score rail on the left), insights as a two-column grid. */
+:root {
+  --bg: #eef2f0;
+  --surface: #ffffff;
+  --sunken: #e4eae7;
+  --ink: #15202a;
+  --muted: #56646c;
+  --line: #d3dbd8;
+  --accent: #1d6a50;          /* fir green */
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefe6;
+  --strong: #1b7a4b; --good: #2c6aa3; --possible: #a8701a; --long: #a44a37; --unlikely: #7d8a90;
+  --warn-soft: #fbefd9; --warn-ink: #7a4f0e;
+  --danger-soft: #f8e1dc; --danger-ink: #8a3424;
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1416; --surface: #162024; --sunken: #111a1d; --ink: #e5ece9; --muted: #95a39e; --line: #263338;
+  --accent: #5cc39c; --accent-ink: #08201a; --accent-soft: #173a2f;
+  --strong: #5cc39c; --good: #79aee0; --possible: #e0a64a; --long: #e08470; --unlikely: #8b979c;
+  --warn-soft: #3a2c12; --warn-ink: #f0c879; --danger-soft: #3d1f19; --danger-ink: #f2a796;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e1416; --surface: #162024; --sunken: #111a1d; --ink: #e5ece9; --muted: #95a39e; --line: #263338;
+  --accent: #5cc39c; --accent-ink: #08201a; --accent-soft: #173a2f;
+  --strong: #5cc39c; --good: #79aee0; --possible: #e0a64a; --long: #e08470; --unlikely: #8b979c;
+  --warn-soft: #3a2c12; --warn-ink: #f0c879; --danger-soft: #3d1f19; --danger-ink: #f2a796;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.45; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+a { color: var(--accent); }
+button { font: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 980px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding-block: 12px 0; }
+.brand { display: flex; flex-direction: column; min-width: 0; }
+.brand b { font-family: var(--font-display); font-weight: 700; font-stretch: 87%; font-size: 21px; letter-spacing: -0.01em; }
+.brand span { font-size: 12.5px; color: var(--muted); }
+.sync { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+.sync .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--unlikely); display: inline-block; margin-right: 6px; }
+.sync .dot.live { background: var(--strong); }
+nav.tabs { flex-basis: 100%; display: flex; gap: 4px; overflow-x: auto; }
+nav.tabs a { text-decoration: none; color: var(--muted); padding: 10px 14px; border-bottom: 3px solid transparent; font-weight: 500; white-space: nowrap; }
+nav.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+nav.tabs .count { font-family: var(--font-mono); font-size: 12px; margin-left: 6px; color: var(--muted); }
+
+main { padding-block: 22px 60px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: 26px; font-weight: 700; font-stretch: 87%; letter-spacing: -0.01em; }
+h2 { font-size: 17px; font-weight: 650; font-stretch: 87%; }
+.eyebrow { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); font-weight: 600; }
+.lede { color: var(--muted); margin: 6px 0 0; max-width: 65ch; }
+.section { display: flex; flex-direction: column; gap: 12px; margin-top: 26px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 7px 12px; cursor: pointer; font-size: 13.5px; font-weight: 500; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); padding-inline: 8px; }
+.btn.quiet:hover { color: var(--ink); background: var(--sunken); }
+.btn[disabled] { opacity: .55; cursor: default; }
+
+/* Job card */
+.card { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 0 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.card.top-pick { border-color: color-mix(in srgb, var(--strong) 45%, var(--line)); }
+.score { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding-top: 2px; }
+.score .num { font-family: var(--font-mono); font-weight: 600; font-size: 28px; line-height: 1; color: var(--band); font-variant-numeric: tabular-nums; }
+.score .band { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--band); }
+.score .none { font-family: var(--font-mono); font-size: 18px; color: var(--unlikely); }
+.score .bar { width: 46px; height: 4px; border-radius: 2px; background: var(--sunken); margin-top: 6px; overflow: hidden; }
+.score .bar i { display: block; height: 100%; background: var(--band); }
+.body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.title-row { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; flex-wrap: wrap; }
+.title-row h3 { font-size: 17.5px; font-weight: 650; font-stretch: 87%; line-height: 1.25; }
+.employer { color: var(--muted); font-weight: 500; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--muted); }
+.meta b { color: var(--ink); font-weight: 500; }
+.template { font-size: 13px; color: var(--muted); }
+.template b { color: var(--accent); font-weight: 600; }
+.notes { font-size: 13.5px; color: var(--ink); opacity: .85; max-width: 75ch; overflow-wrap: anywhere; }
+.notes.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
+.actions .spacer { flex: 1 1 auto; }
+.pill { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--sunken); color: var(--muted); white-space: nowrap; }
+.pill.found { background: var(--accent-soft); color: var(--accent); }
+.pill.ready { background: var(--warn-soft); color: var(--warn-ink); }
+.pill.applied { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
+.pill.interview { background: color-mix(in srgb, var(--strong) 18%, transparent); color: var(--strong); }
+.pill.closed { background: var(--sunken); color: var(--muted); }
+.flag { font-size: 12px; color: var(--warn-ink); background: var(--warn-soft); padding: 2px 8px; border-radius: 6px; }
+.docs { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--sunken); border-radius: 8px; padding: 8px 10px; font-size: 13.5px; }
+.docs .label { font-weight: 600; margin-right: 4px; }
+.working { font-size: 13.5px; color: var(--warn-ink); background: var(--warn-soft); border-radius: 8px; padding: 8px 10px; }
+
+.confirm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; font-size: 13.5px; }
+.confirm p { margin: 0; flex: 1 1 260px; }
+
+.collapsed { font-size: 13.5px; color: var(--muted); }
+.collapsed summary { cursor: pointer; padding: 6px 0; }
+.collapsed ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* Filters */
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.seg { display: inline-flex; background: var(--sunken); border-radius: 9px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 13.5px; font-weight: 500; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.filters select, .filters input { font: inherit; font-size: 13.5px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0; }
+.filters input { flex: 1 1 180px; }
+
+/* Matches: score tier toggles */
+.tiers { display: flex; flex-wrap: wrap; gap: 8px; }
+.tier { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 10px; padding: 7px 12px; cursor: pointer; font: inherit; font-size: 13.5px; }
+.tier i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--band); background: transparent; }
+.tier b { font-weight: 600; color: var(--ink); }
+.tier .rng { font-family: var(--font-mono); font-size: 12px; }
+.tier .ct { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; background: var(--sunken); border-radius: 999px; padding: 1px 7px; color: var(--ink); }
+.tier[aria-pressed="true"] { border-color: var(--band); background: color-mix(in srgb, var(--band) 10%, var(--surface)); }
+.tier[aria-pressed="true"] i { background: var(--band); }
+.tier[aria-pressed="false"] b { color: var(--muted); font-weight: 500; }
+.tier:hover { border-color: var(--band); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* States */
+.empty, .notice { background: var(--surface); border: 1px dashed var(--line); border-radius: var(--radius); padding: 22px; color: var(--muted); }
+.notice.error { border-style: solid; border-color: color-mix(in srgb, var(--danger-ink) 35%, var(--line)); background: var(--danger-soft); color: var(--danger-ink); }
+.notice b { color: inherit; }
+.skeleton { height: 120px; border-radius: var(--radius); background: linear-gradient(90deg, var(--surface), var(--sunken), var(--surface)); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; border: 1px solid var(--line); }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 20; max-width: min(92vw, 520px); }
+
+/* Summary strip */
+.strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin-top: 16px; }
+.strip div { background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+.strip .n { font-family: var(--font-mono); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.strip .l { font-size: 12.5px; color: var(--muted); }
+
+/* Insights */
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel.wide { grid-column: 1 / -1; }
+.panel p.sub { margin: 0; font-size: 13px; color: var(--muted); }
+.rows { display: flex; flex-direction: column; }
+.rows .r { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; align-items: baseline; }
+.rows .r:first-child { border-top: 0; }
+.rows .r span:last-child { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.rows .r.due span:last-child { color: var(--warn-ink); font-weight: 600; }
+.rows .r.ghost span:last-child { color: var(--danger-ink); }
+.bars { display: flex; flex-direction: column; gap: 8px; }
+.bars .b { display: grid; grid-template-columns: minmax(0, 11rem) 1fr 2.5rem; gap: 10px; align-items: center; font-size: 13.5px; }
+.bars .b .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bars .b .track { height: 10px; background: var(--sunken); border-radius: 5px; overflow: hidden; }
+.bars .b .track i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
+.bars .b .v { font-family: var(--font-mono); font-size: 13px; text-align: right; color: var(--muted); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 7px 8px; border-top: 1px solid var(--line); white-space: nowrap; }
+th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); border-top: 0; font-weight: 600; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+th.num { text-align: right; }
+
+/* Applied + Waiting pages */
+.track-row { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.track-row .top { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; justify-content: space-between; }
+.track-row h3 { font-size: 16px; font-weight: 650; font-stretch: 87%; }
+.track-row .when { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track-row .when.due { color: var(--warn-ink); font-weight: 600; }
+.track-row .when.ghost { color: var(--danger-ink); font-weight: 600; }
+.track-row .next { font-size: 13.5px; color: var(--muted); }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.quick .lbl { font-size: 12.5px; color: var(--muted); margin-right: 2px; }
+.mail { background: var(--sunken); border-radius: 8px; padding: 8px 10px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.mail .m { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: baseline; }
+.mail .m .d { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.mail .m .s { overflow-wrap: anywhere; }
+.mail .m .s small { display: block; color: var(--muted); }
+.guess { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; white-space: nowrap; }
+.guess:hover { border-color: var(--accent); color: var(--accent); }
+.stage-count { font-family: var(--font-mono); font-size: 13px; color: var(--muted); margin-left: 6px; }
+
+/* Application page */
+.app-head { display: flex; flex-direction: column; gap: 6px; }
+.back { align-self: flex-start; margin-left: -8px; }
+.app-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13.5px; color: var(--muted); }
+.app-meta .sc { font-family: var(--font-mono); font-weight: 600; color: var(--band); }
+.app-meta .template b { color: var(--accent); }
+.fresh { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.fresh h2 { font-size: 16px; }
+.fresh p.sub { margin: 0; font-size: 13px; color: var(--muted); }
+.fresh textarea { font: inherit; font-size: 14.5px; width: 100%; min-height: 64px; resize: vertical; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.fresh textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fresh .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; }
+.chip:hover { color: var(--ink); border-color: var(--muted); }
+.history { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.history li { font-size: 13.5px; border-left: 3px solid var(--accent-soft); padding: 2px 0 2px 10px; }
+.history li .when { color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
+.history li .ask { font-style: italic; }
+.pdfs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.doc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.doc header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.doc header h2 { font-size: 15px; margin-right: auto; }
+.sheet { background: var(--sunken); padding: 12px; display: flex; justify-content: center; }
+.sheet img { width: 100%; height: auto; display: block; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / .18); border-radius: 2px; }
+.sheet .ph { width: 100%; aspect-ratio: 8.5 / 11; background: #fff; border-radius: 2px; display: grid; place-items: center; color: #6b7477; font-size: 13.5px; text-align: center; padding: 20px; }
+.sheet .ph.loading { background: linear-gradient(90deg, #fff, #f1f3f2, #fff); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
+.progress { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.progress .track { height: 6px; border-radius: 3px; background: var(--sunken); overflow: hidden; position: relative; }
+.progress .track i { position: absolute; inset: 0 auto 0 0; width: 35%; background: var(--accent); border-radius: 3px; animation: slide 1.6s infinite ease-in-out; }
+@keyframes slide { 0% { left: -35%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .progress .track i { animation: none; width: 50%; } .sheet .ph.loading { animation: none; } }
+.progress ol { margin: 0; padding-left: 20px; font-size: 13.5px; color: var(--muted); }
+.sheet img { cursor: zoom-in; }
+.zoom { position: fixed; inset: 0; z-index: 30; background: rgb(10 16 18 / .82); overflow: auto; padding: max(16px, env(safe-area-inset-top, 0px)) 16px 24px; cursor: zoom-out; }
+.zoom img { display: block; width: min(100%, 900px); margin: 0 auto; background: #fff; border-radius: 3px; }
+.zoom .close { position: sticky; top: 0; display: block; margin: 0 auto 10px; width: fit-content; }
+.app-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+
+@media (max-width: 640px) {
+  .pdfs { grid-template-columns: 1fr; }
+  .mail .m { grid-template-columns: 1fr auto; }
+  .mail .m .d { grid-column: 1 / -1; }
+  .card { grid-template-columns: 1fr; gap: 10px; }
+  .score { flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 8px; }
+  .score .bar { display: none; }
+  .grid2 { grid-template-columns: 1fr; }
+  .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sync { margin-left: 0; }
+  .bars .b { grid-template-columns: minmax(0, 8rem) 1fr 2rem; }
+}
+.demo-bar { background: var(--warn-soft); color: var(--warn-ink); font-size: 13.5px; }
+.demo-bar .wrap { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; padding-block: 8px; }
+.demo-bar a { color: inherit; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="demo-bar" role="note"><div class="wrap"><span><b>Demo.</b> Sample data for a fictional line cook. The applicant, employers and job postings are made up, and changes reset when you reload.</span>
+  <a href="https://github.com/aaron-underhill/job-search-agent#readme">How it works</a></div></div>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><b id="brandName">Job Search Agent</b><span id="brandTag">Demo with sample data</span></div>
+    <div class="sync" id="sync"><span><i class="dot" id="dot"></i><span id="syncText">Connecting to your Job Tracker…</span></span><button class="btn quiet" id="refresh" type="button">Refresh</button></div>
+    <nav class="tabs" aria-label="Views">
+      <a href="#latest" data-view="latest">Latest<span class="count" id="c-latest"></span></a>
+      <a href="#browse" data-view="browse">All jobs<span class="count" id="c-browse"></span></a>
+      <a href="#matches" data-view="matches">Matches<span class="count" id="c-matches"></span></a>
+      <a href="#applied" data-view="applied">Applied<span class="count" id="c-applied"></span></a>
+      <a href="#waiting" data-view="waiting">Waiting<span class="count" id="c-waiting"></span></a>
+      <a href="#insights" data-view="insights">Insights</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <div class="section">
+    <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+  </div>
+</main>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="pdf/resume_pdf.js"></script>
+<script src="demo/templates.js"></script>
+<!-- Demo mode: stands in for the claude.ai runtime with sample data. Remove these lines and the page expects the real one. -->
+<script src="demo/demo-data.js"></script>
+<script>
+(() => {
+  "use strict";
+  const CFG = window.BOARD_CONFIG || {};
+  const SHEET_ID = CFG.sheetId || "demo-sheet";
+  const RANGE = "Jobs!A:O";
+  const APPS_RANGE = "Applications!A:C"; // one row per tailored job: "Employer | Job title", updated, application JSON
+  const PDFLIB = "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js";
+  const TAILOR_TASK = CFG.tailorTask || "demo-tailor";
+  const REVISE_TASK = CFG.reviseTask || "demo-revise";
+  const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
+  const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+  const S_SHEETS = "Google Sheets", S_DRIVE = "Google Drive", S_REMOTE = "Claude Code Remote", S_GMAIL = "Gmail";
+
+  const TEMPLATE_NAMES = CFG.templateNames || {};
+  const GAP_TERMS = CFG.gapTerms || [];
+
+  // ---------- state ----------
+  // Remember which score tiers are picked on Matches (this browser only; falls back to 60+).
+  function loadTiers() { try { const v = JSON.parse(localStorage.getItem("matchTiers")); if (Array.isArray(v)) return v; } catch (e) {} return ["Strong", "Good"]; }
+  function saveTiers() { try { localStorage.setItem("matchTiers", JSON.stringify(state.matches.tiers)); } catch (e) {} }
+  const state = { rows: [], loaded: false, error: null, syncedAt: null, view: "latest",
+    browse: { range: "week", status: "open", q: "" }, matches: { range: "week", status: "open", tiers: loadTiers() }, busy: {}, appRow: null, back: "latest", drafts: {} };
+  const mailCache = {}; // row -> { status: "loading" | "ready" | "error", items, msg }
+  const pdfCache = {}; // fileId -> { status: "loading" | "ready" | "error", img, bytes, msg }
+  let mcp = null, downloads = null, unwatch = null, unwatchApps = null;
+  let apps = {}; // keyOf(job) -> { updated, data }
+
+  // ---------- helpers ----------
+  const $ = (s, el = document) => el.querySelector(s);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const pad = (n) => String(n).padStart(2, "0");
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const fmtTime = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const keyOf = (r) => norm(r.employer) + "|" + norm(r.title);
+
+  function parseFound(s) {
+    const m = String(s || "").match(/^(\d{4})-(\d{2})(?:-(\d{2}))?(?:\s+(\d{1,2}):(\d{2}))?/);
+    if (!m) return { date: null, hasTime: false, approx: true };
+    const d = new Date(+m[1], +m[2] - 1, m[3] ? +m[3] : 1, m[4] ? +m[4] : 0, m[5] ? +m[5] : 0);
+    return { date: d, hasTime: !!m[4], approx: !m[3] };
+  }
+  function scoreOf(s) { const m = String(s || "").match(/^\s*(\d{1,3})/); return m ? Math.min(100, +m[1]) : null; }
+  function bandOf(n) {
+    if (n == null) return null;
+    if (n >= 80) return ["Strong", "var(--strong)"];
+    if (n >= 60) return ["Good", "var(--good)"];
+    if (n >= 40) return ["Possible", "var(--possible)"];
+    if (n >= 20) return ["Long shot", "var(--long)"];
+    return ["Unlikely", "var(--unlikely)"];
+  }
+  // Notes hold " Files: resume <url> ; cover letter <url> ; data <url>" (PDFs) or the older " Docs: ..." (Google Docs).
+  const URL_RE = "(https:\\/\\/(?:docs|drive)\\.google\\.com\\/[^\\s;]+)";
+  function lastMatch(text, re) { let m, last = null; const g = new RegExp(re, "gi"); while ((m = g.exec(text))) last = m[1]; return last; }
+  function parseDocs(notes) {
+    const t = String(notes || ""), out = {};
+    const r = lastMatch(t, "resume\\s+" + URL_RE), c = lastMatch(t, "cover letter\\s+" + URL_RE), d = lastMatch(t, "data\\s+" + URL_RE);
+    if (r) out.resume = r; if (c) out.cover = c; if (d) out.data = d;
+    out.kind = r && /\/document\//.test(r) ? "doc" : "pdf";
+    return out;
+  }
+  function parseRevisions(notes) {
+    const out = [], re = /\[Revision ([^\]]+)\]\s*You asked:\s*"([^"]*)"\.?\s*Changed:\s*([^\[]*)/g; let m;
+    while ((m = re.exec(String(notes || "")))) out.push({ when: m[1].trim(), ask: m[2].trim(), changed: m[3].trim() });
+    return out;
+  }
+  const docId = (url) => (String(url).match(/\/d\/([\w-]+)/) || [])[1];
+  const cleanNotes = (n) => String(n || "")
+    .replace(/\s*(Docs|Files):\s*resume\s+\S+\s*;\s*cover letter\s+\S+(\s*;\s*data\s+\S+)?/gi, "")
+    .replace(/\s*\[Revision [^\]]+\][^\[]*/g, "").trim();
+  const statusClass = (s) => ({ "Found": "found", "Ready to apply": "ready", "Applied": "applied", "Acknowledged": "applied", "Assessment": "applied",
+    "Interview": "interview", "Offer": "interview", "Rejected": "closed", "Likely ghosted": "closed", "Skipped": "closed" }[s] || "");
+  const isOpen = (r) => r.status === "Found" || r.status === "Ready to apply" || !r.status;
+  const isPipeline = (r) => ["Applied", "Acknowledged", "Assessment", "Interview", "Offer"].includes(r.status);
+  const RESPONDED = ["Acknowledged", "Assessment", "Interview", "Offer", "Rejected"];
+
+  function toRows(values) {
+    const rows = [];
+    (values || []).slice(1).forEach((v, i) => {
+      const c = (k) => (v && v[k] != null ? String(v[k]) : "");
+      if (!c(2) && !c(3)) return;
+      const found = parseFound(c(0));
+      const r = { row: i + 2, dateFound: c(0), score: c(1), title: c(2), employer: c(3), pay: c(4), location: c(5), source: c(6),
+        link: c(7), posted: c(8), template: c(9), status: c(10), dateApplied: c(11), lastUpdate: c(12), next: c(13), notes: c(14) };
+      r.found = found; r.n = scoreOf(r.score); r.docs = parseDocs(r.notes);
+      r.legacy = !!r.docs.resume; // older applications saved as Google Docs / Drive files
+      r.revisions = parseRevisions(r.notes);
+      rows.push(r);
+    });
+    return rows;
+  }
+
+  function toast(msg) {
+    const t = $("#toast"); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 4200);
+  }
+
+  function errorCopy(err, server) {
+    const s = (err && err.server) || server;
+    switch (err && err.code) {
+      case "needs_reauth": return `Your ${s} connection has expired. Reconnect ${s} in claude.ai Settings → Connectors, then press Refresh.`;
+      case "server_not_connected": return `${s} isn't connected to your account. Add it in claude.ai Settings → Connectors, then press Refresh.`;
+      case "selection_required": return `You have more than one ${s} connector. Choose one when claude.ai asks, then press Refresh.`;
+      case "not_in_manifest": return `This page isn't allowed to use ${s} yet. Allow it from the page's Permissions menu, then press Refresh.`;
+      case "approval_required": return `This page needs your approval to use ${s}. Press the button again and choose Allow.`;
+      case "blocked_by_policy": return `Your organization blocks ${s} for this page.`;
+      case "server_unavailable": return `${s} didn't answer just now. Try again in a minute.`;
+      case "not_granted": case "capability_disabled": case "capability_removed":
+        return `This view can't reach your connectors. Open the page in claude.ai to use it.`;
+      case "tool_error": return `${s} reported a problem: ${err.message || "unknown error"}.`;
+      default: return `${s} didn't respond as expected${err && err.message ? ` (${err.message})` : ""}. Press Refresh to try again.`;
+    }
+  }
+
+  // ---------- data ----------
+  // Attach each job's saved application (from the Applications tab) and work out its state.
+  function joinApps() {
+    state.rows.forEach(r => {
+      r.app = apps[keyOf(r)] || null;
+      r.has = !!(r.app || r.legacy);
+      r.tailoring = /^tailoring requested/i.test(r.next) && !r.has;
+      r.revising = /^revision requested/i.test(r.next) && r.has;
+    });
+  }
+  function applyApps(result) {
+    const v = (result && result.payload && result.payload.values) || [];
+    const next = {};
+    v.slice(1).forEach(row => {
+      const job = String(row[0] || ""), i = job.indexOf(" | "); if (i < 0) return;
+      let data = null; try { data = JSON.parse(String(row[2] || "")); } catch (e) { data = null; }
+      if (!data) return;
+      next[norm(job.slice(0, i)) + "|" + norm(job.slice(i + 3))] = { updated: String(row[1] || ""), data };
+    });
+    apps = next; joinApps(); render();
+  }
+  function applyValues(result) {
+    const p = result && result.payload;
+    const values = p && (p.values || (p.valueRanges && p.valueRanges[0] && p.valueRanges[0].values));
+    if (!values) { state.error = { code: "tool_error", message: "the sheet came back empty", server: S_SHEETS }; render(); return; }
+    state.rows = toRows(values); joinApps();
+    state.loaded = true; state.error = null;
+    state.syncedAt = result.cache && result.cache.storedAt ? new Date(result.cache.storedAt) : new Date();
+    render();
+  }
+
+  function startWatch() {
+    if (unwatch) { try { unwatch(); } catch (e) {} }
+    unwatch = mcp.watchTool(S_SHEETS, "get_values", { spreadsheetId: SHEET_ID, range: RANGE }, (ev) => {
+      if (ev.type === "data") return applyValues(ev.result);
+      const code = ev.error && ev.error.code;
+      if (code === "bad_request" && !state.loaded) return loadOnce(); // watch not supported here: fall back to plain reads
+      if (["needs_reauth", "server_not_connected", "blocked_by_policy", "approval_required", "not_in_manifest"].includes(code)) state.rows = [], state.loaded = false;
+      state.error = ev.error; render();
+    }, { refetchInterval: 120000, cache: { staleTime: 60000, gcTime: 600000 } });
+    if (unwatchApps) { try { unwatchApps(); } catch (e) {} }
+    unwatchApps = mcp.watchTool(S_SHEETS, "get_values", { spreadsheetId: SHEET_ID, range: APPS_RANGE }, (ev) => {
+      if (ev.type === "data") applyApps(ev.result);
+    }, { refetchInterval: 120000, cache: { staleTime: 60000, gcTime: 600000 } });
+  }
+
+  async function loadOnce() {
+    try { applyValues(await mcp.callTool(S_SHEETS, "get_values", { spreadsheetId: SHEET_ID, range: RANGE }, { cache: false })); }
+    catch (err) { state.error = err; render(); }
+    try { applyApps(await mcp.callTool(S_SHEETS, "get_values", { spreadsheetId: SHEET_ID, range: APPS_RANGE }, { cache: false })); }
+    catch (err) { /* no Applications tab yet, or a hiccup: jobs still show */ }
+  }
+
+  async function refresh() {
+    if (!mcp) return;
+    try { await mcp.invalidate(S_SHEETS, "get_values"); } catch (e) {}
+    await loadOnce();
+  }
+
+  // Find the job's current row (rows can move if the sheet is sorted), then write.
+  async function locate(job) {
+    const res = await mcp.callTool(S_SHEETS, "get_values", { spreadsheetId: SHEET_ID, range: RANGE }, { cache: false });
+    const rows = toRows(res.payload && res.payload.values); rows.forEach(r => { r.app = apps[keyOf(r)] || null; r.has = !!(r.app || r.legacy);
+      r.tailoring = /^tailoring requested/i.test(r.next) && !r.has; r.revising = /^revision requested/i.test(r.next) && r.has; });
+    const hit = rows.find(r => keyOf(r) === keyOf(job) && (!job.link || r.link === job.link)) || rows.find(r => keyOf(r) === keyOf(job));
+    if (!hit) throw { code: "tool_error", message: "couldn't find this job in the sheet any more", server: S_SHEETS };
+    return hit;
+  }
+
+  async function setStatus(job, status) {
+    const id = "s" + job.row; if (state.busy[id]) return;
+    state.busy[id] = true; render();
+    try {
+      const cur = await locate(job);
+      const applied = status === "Applied" && !cur.dateApplied ? "'" + todayISO() : null;
+      const NEXT = { Applied: "Follow up in 7 to 10 days if no word", Assessment: "Complete the assessment", Interview: "Prepare for the interview (time is in your email)",
+        Offer: "Review the offer", Rejected: "None (closed)", "Likely ghosted": "None (no reply after 3 weeks)" };
+      await mcp.callTool(S_SHEETS, "update_values", { spreadsheetId: SHEET_ID, range: `Jobs!K${cur.row}:N${cur.row}`,
+        values: [[status, applied, "'" + todayISO(), NEXT[status] ?? null]] });
+      toast(`Marked ${cur.title} as ${status}.`);
+      await refresh();
+    } catch (err) { toast(errorCopy(err, S_SHEETS)); }
+    finally { delete state.busy[id]; render(); }
+  }
+
+  async function createDocs(job) {
+    const id = "t" + job.row; if (state.busy[id]) return;
+    state.busy[id] = true; render();
+    try {
+      const cur = await locate(job);
+      if (cur.has || cur.tailoring) { await refresh(); return; } // already made or already running
+      const payload = { employer: cur.employer, title: cur.title, link: cur.link, template: cur.template, row: cur.row };
+      await mcp.callTool(S_REMOTE, "fire_trigger", { trigger_id: TAILOR_TASK, text: JSON.stringify(payload) });
+      const now = new Date();
+      try {
+        await mcp.callTool(S_SHEETS, "update_values", { spreadsheetId: SHEET_ID, range: `Jobs!M${cur.row}:N${cur.row}`,
+          values: [["'" + todayISO(), `Tailoring requested ${fmtTime(now)}`]] });
+      } catch (e) { /* the task still runs; the card just won't show the waiting state */ }
+      toast("Started. Your resume and cover letter will show up on this page in a few seconds in this demo (the live agent takes a few minutes and sends a phone notice).");
+      await refresh();
+    } catch (err) {
+      const s = err && err.server ? err.server : S_REMOTE;
+      toast(err && (err.code === "server_unavailable" || err.code === "upstream_error")
+        ? "Not sure the request went through. Wait a minute and press Refresh before trying again."
+        : errorCopy(err, s));
+    } finally { delete state.busy[id]; render(); }
+  }
+
+  // Fetch a resume or cover letter from Drive as PDF bytes. Works for the PDFs the tailoring task saves and for
+  // older Google Docs (exported to PDF; the export type is ignored for files that are already PDFs).
+  async function fetchPdfBytes(id) {
+    const res = await mcp.callTool(S_DRIVE, "download_file_content", { fileId: id, exportMimeType: "application/pdf" });
+    const b64 = res.payload && (res.payload.content || res.payload.base64Content);
+    if (!b64) throw { code: "tool_error", message: "Drive returned no file", server: S_DRIVE };
+    const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  // A job's documents are built here in the page from its saved application (no files in Drive).
+  // Older applications made as Google Docs are fetched from Drive as PDFs instead.
+  const docKey = (r, which) => r.app ? `L|${r.row}|${r.app.updated}|${which}` : docId(which === "resume" ? r.docs.resume : r.docs.cover);
+  let pdflibReady = null;
+  function loadScript(src) {
+    return new Promise((ok, bad) => { const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = () => bad(new Error("couldn't load " + src)); document.head.appendChild(el); });
+  }
+  function pdflib() {
+    if (!pdflibReady) pdflibReady = (async () => { if (!window.PDFLib) await loadScript(PDFLIB); if (!window.PDFLib) throw new Error("pdf-lib didn't load"); return window.PDFLib; })();
+    pdflibReady.catch(() => { pdflibReady = null; });
+    return pdflibReady;
+  }
+  async function bytesFor(r, which) {
+    const k = docKey(r, which), c = pdfCache[k];
+    if (c && c.bytes) return c.bytes;
+    if (r.app) {
+      const out = await window.ResumePdf.build(await pdflib(), r.app.data);
+      const rk = docKey(r, "resume"), ck = docKey(r, "cover");
+      pdfCache[rk] = Object.assign(pdfCache[rk] || {}, { bytes: out.resume, pages: out.resumePages });
+      if (out.cover) pdfCache[ck] = Object.assign(pdfCache[ck] || {}, { bytes: out.cover, pages: out.coverPages });
+      return which === "resume" ? out.resume : out.cover;
+    }
+    return fetchPdfBytes(k);
+  }
+
+  async function downloadPdf(r, which, filename, btn) {
+    if (!downloads) { toast("Downloads aren't available in this view. Open the page in claude.ai to download."); return; }
+    btn.disabled = true; const label = btn.textContent; btn.textContent = "Preparing…";
+    try {
+      const bytes = await bytesFor(r, which);
+      if (!bytes) throw { code: "tool_error", message: "nothing to download" };
+      await downloads.save({ filename, data: new Blob([bytes.slice(0)], { type: "application/pdf" }) });
+    } catch (err) {
+      if (err && err.code === "declined") return;
+      toast(err && err.server ? errorCopy(err, err.server) : "The download didn't start. Try again in a moment.");
+    } finally { btn.disabled = false; btn.textContent = label; }
+  }
+
+  // pdf.js draws page 1 of each PDF; the picture is kept as an image so re-renders don't flicker.
+  // (If a separate worker isn't allowed here, pdf.js falls back to running on the page itself.)
+  let pdfjsReady = null;
+  function pdfjs() {
+    if (!pdfjsReady) pdfjsReady = (async () => {
+      const lib = await import(PDFJS);
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      return lib;
+    })();
+    pdfjsReady.catch(() => { pdfjsReady = null; });
+    return pdfjsReady;
+  }
+  async function ensurePreview(r, which) {
+    const k = docKey(r, which); if (!k || !mcp) return;
+    const c = pdfCache[k];
+    if (c && (c.status === "loading" || c.status === "ready" || c.status === "error")) return;
+    pdfCache[k] = Object.assign(c || {}, { status: "loading" });
+    try {
+      const bytes = await bytesFor(r, which);
+      const lib = await pdfjs();
+      const doc = await lib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+      const page = await doc.getPage(1);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: 1300 / base.width });
+      const canvas = document.createElement("canvas"); canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+      const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
+      pdfCache[k] = Object.assign(pdfCache[k], { status: "ready", pages: pdfCache[k].pages || doc.numPages, img: canvas.toDataURL("image/png") });
+    } catch (err) {
+      pdfCache[k] = Object.assign(pdfCache[k] || {}, { status: "error", msg: err && err.server ? errorCopy(err, err.server)
+        : pdfCache[k] && pdfCache[k].bytes ? "The preview couldn't be drawn here, but the PDF is ready: use Download PDF." : "Couldn't build this document. Press Refresh and try again." });
+    }
+    render();
+  }
+
+  async function freshen(job, request) {
+    const id = "r" + job.row; if (state.busy[id]) return;
+    request = String(request || "").trim().slice(0, 800);
+    if (!request) { toast("Write what you'd like changed first."); return; }
+    state.busy[id] = true; render();
+    try {
+      const cur = await locate(job);
+      if (cur.revising) { toast("A revision is already running for this job. It'll show up here when it's done."); return; }
+      const payload = { employer: cur.employer, title: cur.title, row: cur.row, request };
+      if (!cur.app && cur.legacy) payload.legacy = { resume: cur.docs.resume || "", cover: cur.docs.cover || "" };
+      await mcp.callTool(S_REMOTE, "fire_trigger", { trigger_id: REVISE_TASK, text: JSON.stringify(payload) });
+      try {
+        const short = request.replace(/\s+/g, " ").slice(0, 90) + (request.length > 90 ? "…" : "");
+        await mcp.callTool(S_SHEETS, "update_values", { spreadsheetId: SHEET_ID, range: `Jobs!M${cur.row}:N${cur.row}`,
+          values: [["'" + todayISO(), `Revision requested ${fmtTime(new Date())}: ${short}`]] });
+      } catch (e) { /* the task still runs */ }
+      state.drafts[cur.row] = "";
+      toast("Sent. In this demo the update shows up in a few seconds (the live agent takes a few minutes).");
+      await refresh();
+    } catch (err) {
+      const s = err && err.server ? err.server : S_REMOTE;
+      toast(err && (err.code === "server_unavailable" || err.code === "upstream_error")
+        ? "Not sure the request went through. Wait a minute and press Refresh before sending it again."
+        : errorCopy(err, s));
+    } finally { delete state.busy[id]; render(); }
+  }
+
+  // ---------- views ----------
+  // Latest = jobs POSTED TODAY, from the newest hourly search that found at least one.
+  // A search that finds nothing posted today leaves the previous batch up; a search that does
+  // replaces it. At midnight the page clears until the first job posted that day turns up.
+  const sameDay = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  function postedSameDayAsFound(r) {
+    if (!r.found.hasTime || !r.found.date) return false;
+    const p = String(r.posted || "").trim();
+    const m = p.match(/^(\d{4})-(\d{2})-(\d{2})/); // exact date only; "~2026-10-21" estimates don't count
+    if (m) return sameDay(new Date(+m[1], +m[2] - 1, +m[3]), r.found.date);
+    return /^(today|just posted|posted today|new today|\d+\s*(min(ute)?s?|h(ou)?rs?)\s*ago)\b/i.test(p);
+  }
+  function latestBatch() {
+    const today = new Date();
+    const cand = state.rows.filter(r => postedSameDayAsFound(r) && sameDay(r.found.date, today));
+    const live = cand.filter(r => r.status !== "Skipped");
+    if (!live.length) return { key: null, rows: [] };
+    const d = live.reduce((a, r) => (r.found.date > a.found.date ? r : a)).found.date;
+    const sameHour = (x) => sameDay(x, d) && x.getHours() === d.getHours();
+    const rows = cand.filter(r => sameHour(r.found.date));
+    return { key: rows.find(r => r.status !== "Skipped").dateFound, rows };
+  }
+  const byScore = (a, b) => (b.n ?? -1) - (a.n ?? -1) || ((b.found.date || 0) - (a.found.date || 0));
+
+  function card(r, { compact = false } = {}) {
+    const band = bandOf(r.n);
+    const tName = TEMPLATE_NAMES[r.template] || r.template;
+    const notes = cleanNotes(r.notes);
+    const unverified = /couldn'?t verify/i.test(notes);
+    const sBusy = state.busy["s" + r.row], tBusy = state.busy["t" + r.row];
+    const canCreate = isOpen(r) && !r.has && !r.tailoring;
+    const link = safeUrl(r.link);
+    return `<article class="card${r.n >= 60 ? " top-pick" : ""}" style="--band:${band ? band[1] : "var(--unlikely)"}">
+      <div class="score" aria-label="${r.n != null ? `Hiring likelihood ${r.n} of 100, ${band[0]}` : "Not scored"}">
+        ${r.n != null ? `<span class="num">${r.n}</span><span class="band">${band[0]}</span><span class="bar"><i style="width:${r.n}%"></i></span>`
+          : `<span class="none">—</span><span class="band" style="color:var(--unlikely)">${r.score ? esc(r.score) : "Not scored"}</span>`}
+      </div>
+      <div class="body">
+        <div class="title-row"><h3>${esc(r.title)} <span class="employer">· ${esc(r.employer)}</span></h3>
+          ${r.status ? `<span class="pill ${statusClass(r.status)}">${esc(r.status)}</span>` : ""}</div>
+        <div class="meta">
+          ${r.pay ? `<span><b>${esc(r.pay)}</b></span>` : ""}
+          ${r.location ? `<span>${esc(r.location)}</span>` : ""}
+          ${r.posted ? `<span>Posted ${esc(r.posted)}</span>` : ""}
+          ${r.source ? `<span>via ${esc(r.source)}</span>` : ""}
+          ${unverified ? `<span class="flag">Check the listing before applying</span>` : ""}
+        </div>
+        ${r.template ? `<div class="template">Using: <b>${esc(tName)}</b> template</div>` : ""}
+        ${notes && !compact ? `<div class="notes clamp" data-expand>${esc(notes)}</div>` : ""}
+        ${r.has ? `<div class="docs"><span class="label">${r.revising ? "Claude is revising your resume and cover letter" : "Resume and cover letter ready"}</span>
+            <a class="btn" href="#app/${r.row}">Open</a></div>` : ""}
+        ${r.tailoring ? `<div class="working">${esc(r.next)}. Writing your resume and cover letter now. <a href="#app/${r.row}">Watch progress</a></div>` : ""}
+        <div class="actions">
+          ${link ? `<a class="btn" href="${esc(link)}" target="_blank" rel="noopener">Open listing ↗</a>` : `<span class="pill">No link</span>`}
+          ${canCreate ? `<button class="btn primary" type="button" data-create="${r.row}" ${tBusy ? "disabled" : ""}>${tBusy ? "Starting…" : "Create resume + cover letter"}</button>` : ""}
+          ${r.has ? `<a class="btn primary" href="#app/${r.row}">View resume + cover letter</a>` : ""}
+          <span class="spacer"></span>
+          ${isOpen(r) ? `<button class="btn quiet" type="button" data-status="Applied" data-row="${r.row}" ${sBusy ? "disabled" : ""}>Mark applied</button>
+            <button class="btn quiet" type="button" data-status="Skipped" data-row="${r.row}" ${sBusy ? "disabled" : ""}>Skip</button>` : ""}
+          ${isPipeline(r) ? `<select class="btn quiet" data-move="${r.row}" aria-label="Update status" ${sBusy ? "disabled" : ""}>
+              <option value="">Update status…</option>${["Acknowledged", "Assessment", "Interview", "Offer", "Rejected", "Likely ghosted"].map(s => `<option>${s}</option>`).join("")}</select>` : ""}
+          ${r.status === "Skipped" ? `<button class="btn quiet" type="button" data-status="Found" data-row="${r.row}" ${sBusy ? "disabled" : ""}>Restore</button>` : ""}
+        </div>
+      </div>
+    </article>`;
+  }
+
+  const safeUrl = (u) => /^https:\/\//i.test(u || "") ? u : null;
+  const fileBase = (r, kind) => `${CFG.filePrefix || "Applicant"}_${kind}_${(r.employer || "Employer").replace(/[^\w]+/g, "_").replace(/^_|_$/g, "")}.pdf`;
+
+  // ---------- application page ----------
+  const SUGGESTIONS = CFG.suggestions || [];
+  function docPanel(r, which) {
+    if (!r.app && !(which === "resume" ? r.docs.resume : r.docs.cover)) return "";
+    if (r.app && which === "cover" && !r.app.data.cover) return "";
+    const k = docKey(r, which), c = pdfCache[k] || { status: "loading" };
+    const title = which === "resume" ? "Resume" : "Cover letter";
+    const sheet = c.status === "ready" ? `<img src="${c.img}" alt="${title} for ${esc(r.title)}, ${esc(r.employer)}, page 1" data-zoom="${esc(k)}" title="Click to enlarge">`
+      : c.status === "error" ? `<div class="ph">${esc(c.msg)}</div>` : `<div class="ph loading">Building the ${title.toLowerCase()}…</div>`;
+    const more = c.status === "ready" && c.pages > 1 ? `<span class="flag">Runs to ${c.pages} pages</span>` : "";
+    const drive = !r.app && safeUrl(which === "resume" ? r.docs.resume : r.docs.cover);
+    return `<section class="doc"><header><h2>${title}</h2>${more}
+        <button class="btn" type="button" data-dl="${which}" data-row="${r.row}" data-name="${esc(fileBase(r, which === "resume" ? "Resume" : "Cover_Letter"))}">Download PDF</button>
+        ${drive ? `<a class="btn quiet" href="${esc(drive)}" target="_blank" rel="noopener">Open in Drive ↗</a>` : ""}</header>
+      <div class="sheet">${sheet}</div></section>`;
+  }
+  function viewApp() {
+    const r = state.rows.find(x => x.row === state.appRow);
+    const back = `<a class="btn quiet back" href="#${esc(state.back)}">← Back to jobs</a>`;
+    if (!r) return `<div class="app-head">${back}<div class="empty">This job isn't in the tracker any more. It may have moved; go back and open it again.</div></div>`;
+    const band = bandOf(r.n), tName = TEMPLATE_NAMES[r.template] || r.template, link = safeUrl(r.link);
+    const head = `<div class="app-head" style="--band:${band ? band[1] : "var(--unlikely)"}">${back}
+        <p class="eyebrow">Resume and cover letter</p>
+        <h1>${esc(r.title)} <span class="employer">· ${esc(r.employer)}</span></h1>
+        <div class="app-meta">
+          ${r.n != null ? `<span class="sc">${r.n} · ${band[0]}</span>` : ""}
+          ${tName ? `<span class="template">Using: <b>${esc(tName)}</b> template</span>` : ""}
+          ${r.status ? `<span class="pill ${statusClass(r.status)}">${esc(r.status)}</span>` : ""}
+          ${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Open listing ↗</a>` : ""}
+        </div></div>`;
+    const sBusy = state.busy["s" + r.row];
+    const actions = `<div class="app-actions">
+        ${isOpen(r) ? `<button class="btn" type="button" data-status="Applied" data-row="${r.row}" ${sBusy ? "disabled" : ""}>Mark applied</button>` : ""}
+        <span class="collapsed">${r.app ? `Built from the version saved ${esc(r.app.updated || "")}. Nothing is stored in Drive; download what you need.` : "Older version, saved in Google Drive."}</span></div>`;
+    if (r.tailoring) {
+      const started = (String(r.next).match(/requested\s+(.+)$/i) || [])[1];
+      return head + `<div class="progress" role="status"><h2>Writing your resume and cover letter</h2>
+          <div class="track"><i></i></div>
+          <p class="sub" style="margin:0;color:var(--muted);font-size:13.5px">${started ? `Started ${esc(started)}. ` : ""}This usually takes a few minutes. You can leave this page; your phone gets a notice when they're ready, and they'll appear here.</p>
+          <ol><li>Read the posting and check it's still open</li><li>Tailor the ${esc(tName || "best-matching")} template to it, keeping every claim true</li><li>Check both fit on one page</li><li>Save the tailored text to your Job Tracker; this page builds the PDFs from it</li></ol></div>`;
+    }
+    if (!r.has) {
+      const tBusy = state.busy["t" + r.row];
+      const canCreate = isOpen(r);
+      return head + `<div class="progress"><h2>No resume or cover letter yet</h2>
+          <p class="sub" style="margin:0;color:var(--muted);font-size:13.5px">${canCreate ? `Claude will tailor the ${esc(tName || "best-matching")} template to this posting, and this page builds both as PDFs. It takes a few minutes.` : `This job is marked ${esc(r.status)}, so there's nothing to create.`}</p>
+          ${canCreate ? `<div><button class="btn primary" type="button" data-go="${r.row}" ${tBusy ? "disabled" : ""}>${tBusy ? "Starting…" : "Create resume + cover letter"}</button></div>` : ""}</div>`;
+    }
+    const rBusy = state.busy["r" + r.row];
+    const draft = state.drafts[r.row] || "";
+    const pending = r.revising ? `<div class="working" role="status">Claude is working on: ${esc(String(r.next).replace(/^revision requested\s*/i, ""))}. The new PDFs will replace these in a few minutes.</div>` : "";
+    const hist = r.revisions.length ? `<details class="collapsed"${r.revisions.length < 3 ? " open" : ""}><summary>${r.revisions.length} earlier ${r.revisions.length === 1 ? "change" : "changes"}</summary>
+        <ul class="history">${r.revisions.slice().reverse().map(v => `<li><span class="when">${esc(v.when)}</span><br><span class="ask">“${esc(v.ask)}”</span><br>${esc(v.changed)}</li>`).join("")}</ul></details>` : "";
+    const oldDocs = !r.app && r.docs.kind === "doc" ? `<p class="sub">These were made with the older Google Docs layout. Send any change (or just “rebuild in the new design”) and they'll come back as PDFs in your original design.</p>` : "";
+    const fresh = `<section class="fresh" aria-labelledby="fresh-h"><h2 id="fresh-h">Freshen it up</h2>
+        <p class="sub">Tell Claude what to change in either document. It only changes what you ask, keeps every claim true, and keeps both to one page.</p>${oldDocs}
+        ${pending}
+        <textarea id="fresh-${r.row}" data-draft="${r.row}" placeholder="${esc(CFG.freshenExample || "e.g. Put the most relevant experience first")}" ${r.revising || rBusy ? "disabled" : ""}>${esc(draft)}</textarea>
+        <div class="row">${SUGGESTIONS.map(t => `<button class="chip" type="button" data-suggest="${esc(t)}" data-for="${r.row}" ${r.revising ? "disabled" : ""}>${esc(t)}</button>`).join("")}</div>
+        <div class="row"><button class="btn primary" type="button" data-fresh="${r.row}" ${r.revising || rBusy ? "disabled" : ""}>${rBusy ? "Sending…" : "Send to Claude"}</button>
+          <span class="collapsed">Takes a few minutes. Your phone gets a notice when it's done.</span></div>
+        ${hist}</section>`;
+    const z = state.zoom && pdfCache[state.zoom] && pdfCache[state.zoom].img;
+    const zoom = z ? `<div class="zoom" data-zoom-close role="dialog" aria-label="Enlarged preview"><button class="btn close" type="button" data-zoom-close>Close</button><img src="${z}" alt="Enlarged preview"></div>` : "";
+    return head + fresh + `<div class="pdfs">${docPanel(r, "resume")}${docPanel(r, "cover")}</div>` + actions + zoom;
+  }
+
+  // ---------- Applied + Waiting ----------
+  const APPLIED_STATES = ["Applied", "Acknowledged", "Assessment", "Interview", "Offer", "Rejected", "Likely ghosted"];
+  const isApplied = (r) => APPLIED_STATES.includes(r.status);
+  const isWaiting = (r) => r.status === "Applied" || r.status === "Acknowledged";
+  function dedupe(rows) { const seen = new Set(); return rows.filter(r => { const k = keyOf(r); if (seen.has(k)) return false; seen.add(k); return true; }); }
+
+  // Gmail: read-only search for emails from this employer since the application, so you can confirm a status.
+  const msgDate = (id) => { try { return new Date(Number(BigInt("0x" + id) >> 20n)); } catch (e) { return null; } };
+  function guessStatus(subject) {
+    const s = String(subject || "").toLowerCase();
+    if (/offer letter|job offer|pleased to offer/.test(s)) return "Offer";
+    if (/interview|schedule (a|your) (call|time|meeting)|next steps|phone screen|meet with/.test(s) && !/text interview|self-paced|assessment/.test(s)) return "Interview";
+    if (/assessment|text interview|self-paced|questionnaire|skills test|hirevue|screening/.test(s)) return "Assessment";
+    if (/unfortunately|not (be )?moving forward|other candidates|no longer (being )?considered|position (has been )?filled|update on your application|regret/.test(s)) return "Rejected";
+    if (/thank you for (applying|your application|your interest)|application (received|submitted|confirmation)|we('ve| have) received/.test(s)) return "Acknowledged";
+    return null;
+  }
+  function mailQuery(r) {
+    const emp = String(r.employer || "").replace(/["()]/g, " ").replace(/\s+/g, " ").trim();
+    const words = emp.split(" ").filter(w => !/^(the|of|and|inc\.?|llc|co\.?|corp\.?|group)$/i.test(w));
+    const short = words.length > 2 ? (/\.$|^.{1,3}$/.test(words[1]) ? words[0] : words.slice(0, 2).join(" ")) : "";
+    const terms = [`"${emp}"`]; if (short && short.toLowerCase() !== emp.toLowerCase()) terms.push(`"${short}"`);
+    const m = String(r.dateApplied || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const since = m ? new Date(+m[1], +m[2] - 1, +m[3] - 2) : new Date(Date.now() - 60 * 86400000);
+    const after = `${since.getFullYear()}/${pad(since.getMonth() + 1)}/${pad(since.getDate())}`;
+    return `(${terms.join(" OR ")}) after:${after} -in:sent -from:jobalerts-noreply@linkedin.com -from:alert@indeed.com -from:noreply@glassdoor.com`;
+  }
+  async function checkMail(r) {
+    if (!mcp) return;
+    mailCache[r.row] = { status: "loading" }; render();
+    try {
+      const res = await mcp.callTool(S_GMAIL, "search_threads", { query: mailQuery(r), pageSize: 8 });
+      const threads = (res.payload && res.payload.threads) || [];
+      const items = threads.map(t => {
+        const ms = t.messages || []; const last = ms[ms.length - 1] || {};
+        const subject = last.subject || (ms[0] && ms[0].subject) || "(no subject)";
+        return { id: t.id, subject, sender: last.sender || "", date: msgDate(last.id || t.id), count: t.messageCount || ms.length, guess: guessStatus(subject) };
+      }).sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 6);
+      mailCache[r.row] = { status: "ready", items };
+    } catch (err) {
+      mailCache[r.row] = { status: "error", msg: errorCopy(err, S_GMAIL) };
+    }
+    render();
+  }
+  // Only suggest moving forward (a rejection always counts), never back to an earlier stage.
+  const RANK = { Found: 0, "Ready to apply": 0, Applied: 1, Acknowledged: 2, Assessment: 3, Interview: 4, Offer: 5 };
+  const isForward = (cur, next) => next === "Rejected" ? !["Rejected", "Offer"].includes(cur) : (RANK[next] ?? 0) > (RANK[cur] ?? 0);
+  const fmtDay = (d) => d ? d.toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+  function mailBlock(r) {
+    const c = mailCache[r.row]; if (!c) return "";
+    if (c.status === "loading") return `<div class="mail" role="status">Searching your Gmail for ${esc(r.employer)}…</div>`;
+    if (c.status === "error") return `<div class="mail">${esc(c.msg)}</div>`;
+    if (!c.items.length) return `<div class="mail">No emails from ${esc(r.employer)} since you applied. (Job-alert emails are left out.)</div>`;
+    return `<div class="mail">${c.items.map(m => `<div class="m"><span class="d">${esc(fmtDay(m.date))}</span>
+        <span class="s"><b>${esc(m.subject)}</b><small>${esc(m.sender)}${m.count > 1 ? ` · ${m.count} messages` : ""}</small></span>
+        ${m.guess && isForward(r.status, m.guess) ? `<button class="guess" type="button" data-status="${m.guess}" data-row="${r.row}" title="Set status to ${m.guess}">Looks like: ${m.guess} · set</button>` : `<span></span>`}</div>`).join("")}</div>`;
+  }
+
+  function trackRow(r) {
+    const d = daysSince(r.dateApplied);
+    const waiting = isWaiting(r);
+    const cls = waiting && d != null ? (d >= 21 ? "ghost" : d >= 7 ? "due" : "") : "";
+    const when = r.dateApplied ? `Applied ${esc(fmtDay(parseFound(r.dateApplied).date))}${d != null ? ` · ${d} ${d === 1 ? "day" : "days"}` : ""}${cls === "due" ? " · follow up" : cls === "ghost" ? " · likely ghosted" : ""}` : "Date applied not recorded";
+    const sBusy = state.busy["s" + r.row];
+    const next = r.next && !/^(review docs|wait)/i.test(r.next) ? `<div class="next">${esc(r.next)}</div>` : "";
+    const quick = ["Acknowledged", "Assessment", "Interview", "Offer", "Rejected", "Likely ghosted"].filter(x => x !== r.status);
+    const labels = { Acknowledged: "Confirmed", Assessment: "Assessment", Interview: "Got an interview", Offer: "Got an offer", Rejected: "Rejected", "Likely ghosted": "Ghosted" };
+    return `<article class="track-row">
+        <div class="top"><h3>${esc(r.title)} <span class="employer">· ${esc(r.employer)}</span></h3>
+          <span class="pill ${statusClass(r.status)}">${esc(r.status === "Acknowledged" ? "Confirmed" : r.status)}</span></div>
+        <div class="top"><span class="when ${cls}">${when}</span>
+          <span class="quick">${r.has ? `<a class="btn quiet" href="#app/${r.row}">Resume + cover letter</a>` : ""}
+            ${safeUrl(r.link) ? `<a class="btn quiet" href="${esc(r.link)}" target="_blank" rel="noopener">Listing ↗</a>` : ""}
+            <button class="btn quiet" type="button" data-mail="${r.row}">${mailCache[r.row] ? "Search Gmail again" : "Check Gmail"}</button></span></div>
+        ${next}
+        <div class="quick"><span class="lbl">Update:</span>${quick.map(x => `<button class="chip" type="button" data-status="${x}" data-row="${r.row}" ${sBusy ? "disabled" : ""}>${labels[x]}</button>`).join("")}</div>
+        ${mailBlock(r)}
+      </article>`;
+  }
+
+  function viewApplied() {
+    const rows = dedupe(state.rows.filter(isApplied)).sort((a, b) => String(b.dateApplied).localeCompare(String(a.dateApplied)));
+    const groups = [
+      ["Interviews and offers", rows.filter(r => ["Interview", "Offer"].includes(r.status))],
+      ["Your move", rows.filter(r => r.status === "Assessment")],
+      ["Waiting to hear back", rows.filter(isWaiting)],
+      ["Closed", rows.filter(r => ["Rejected", "Likely ghosted"].includes(r.status))],
+    ];
+    return `<div><p class="eyebrow">Every application you've sent</p><h1>Applied</h1>
+        <p class="lede">The hourly search reads your Gmail and moves these along on its own (confirmations, assessments, interviews, rejections). You can also set a status yourself, or press Check Gmail to see the emails from that employer since you applied.</p></div>
+      ${rows.length ? groups.filter(g => g[1].length).map(([t, rs]) => `<section class="section"><div class="section-head"><h2>${t}<span class="stage-count">${rs.length}</span></h2></div>${rs.map(trackRow).join("")}</section>`).join("")
+        : `<div class="empty" style="margin-top:20px">No applications yet. Press "Mark applied" on a job once you've sent it.</div>`}`;
+  }
+
+  function viewWaiting() {
+    const rows = dedupe(state.rows.filter(isWaiting)).sort((a, b) => (daysSince(b.dateApplied) ?? -1) - (daysSince(a.dateApplied) ?? -1));
+    const notHeard = rows.filter(r => r.status === "Applied"), confirmed = rows.filter(r => r.status === "Acknowledged");
+    const due = rows.filter(r => (daysSince(r.dateApplied) ?? 0) >= 7).length;
+    return `<div><p class="eyebrow">Still waiting on a reply</p><h1>Waiting${rows.length ? ` on ${rows.length}` : ""}</h1>
+        <p class="lede">Applications with no decision yet: no interview, assessment, offer or rejection. Oldest first. Follow up after 7 to 10 days; after 21 days with nothing, mark it ghosted.${due ? ` ${due} ${due === 1 ? "is" : "are"} due for a follow-up.` : ""}</p></div>
+      ${notHeard.length ? `<section class="section"><div class="section-head"><h2>No reply at all yet<span class="stage-count">${notHeard.length}</span></h2></div>${notHeard.map(trackRow).join("")}</section>` : ""}
+      ${confirmed.length ? `<section class="section"><div class="section-head"><h2>Confirmed received, no decision<span class="stage-count">${confirmed.length}</span></h2></div>${confirmed.map(trackRow).join("")}</section>` : ""}
+      ${rows.length ? "" : `<div class="empty" style="margin-top:20px">Nothing waiting. Every application has an answer.</div>`}`;
+  }
+
+  function nextCheck() {
+    const d = new Date(); const n = new Date(d); n.setMinutes(1, 0, 0); if (n <= d) n.setHours(n.getHours() + 1); return n;
+  }
+
+  function viewLatest() {
+    const { key, rows } = latestBatch();
+    if (!key) return `<div><p class="eyebrow">Posted today</p><h1>Nothing posted today yet</h1></div>
+      <div class="empty">This page only shows jobs that were posted today. The next search runs at ${fmtTime(nextCheck())}; if it finds a job posted today, it shows up here. Everything found earlier is under All jobs.</div>`;
+    const f = parseFound(key);
+    const when = f.date ? (f.hasTime ? f.date.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      : f.date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })) : key;
+    const live = rows.filter(r => r.status !== "Skipped").sort(byScore);
+    const picks = live.filter(r => r.n >= 60), rest = live.filter(r => !(r.n >= 60));
+    const skipped = rows.filter(r => r.status === "Skipped");
+    return `<div><p class="eyebrow">Posted today · found in the ${esc(when)} search</p>
+        <h1>${live.length} ${live.length === 1 ? "job" : "jobs"} posted today${picks.length ? `, ${picks.length} worth applying to` : ""}</h1>
+        <p class="lede">These are the jobs posted today from the most recent search that found any. They stay up until a later search finds a new job posted today, then that batch replaces them. Earlier finds are under All jobs. Next search runs at ${fmtTime(nextCheck())}.</p></div>
+      ${picks.length ? `<section class="section"><div class="section-head"><h2>Best matches · 60 and up</h2></div>${picks.map(r => card(r)).join("")}</section>` : ""}
+      ${rest.length ? `<section class="section"><div class="section-head"><h2>${picks.length ? "Other new jobs" : "New jobs"}</h2></div>${rest.map(r => card(r)).join("")}</section>` : ""}
+      ${skipped.length ? `<details class="collapsed section"><summary>${skipped.length} skipped by the filters in this batch</summary>
+        <ul>${skipped.map(r => `<li><b>${esc(r.title)}</b>, ${esc(r.employer)}: ${esc(cleanNotes(r.notes))}</li>`).join("")}</ul></details>` : ""}`;
+  }
+
+  // Used by Insights ("found this week"): when the search found the job.
+  function inRange(r, range) {
+    if (range === "all") return true;
+    if (!r.found.date || r.found.approx) return false;
+    const now = new Date();
+    const start = range === "today" ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      : new Date(now.getTime() - (range === "week" ? 7 : 30) * 86400000);
+    return r.found.date >= start && r.found.date <= now;
+  }
+
+  // The day a job was POSTED, from the Posted column. Relative wording is counted from the day it was found.
+  // Returns null when there's no usable date ("30+ days", "unclear", blank).
+  function postedDay(r) {
+    const p = String(r.posted || "").trim().toLowerCase();
+    const day = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    let m = p.match(/^~?\s*(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    const base = r.found.date && !r.found.approx ? day(r.found.date) : null;
+    if (!base) return null;
+    if (/^(today|just posted|posted today|new today|\d+\s*(min(ute)?s?|h(ou)?rs?)\s*ago)\b/.test(p)) return base;
+    if (/^(yesterday|1 day ago)\b/.test(p)) return new Date(base.getTime() - 86400000);
+    m = p.match(/^~?\s*(\d+)\s*days?\s*ago/);
+    if (m) return new Date(base.getFullYear(), base.getMonth(), base.getDate() - +m[1]);
+    return null;
+  }
+  // Calendar-day windows on the posting date, both ends included.
+  // On 10/28: Today = 10/28; Past week = 10/21-10/28; Past month = 9/28-10/28. No posting date -> All time only.
+  function postedInRange(r, range) {
+    if (range === "all") return true;
+    const d = postedDay(r); if (!d) return false;
+    const now = new Date(); const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const start = range === "today" ? today
+      : range === "week" ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7)
+      : new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+    return d >= start && d <= today;
+  }
+  const statusOk = (r, s) => s === "all" || (s === "open" && isOpen(r)) || (s === "pipeline" && (isPipeline(r) || ["Rejected", "Likely ghosted"].includes(r.status))) || (s === "skipped" && r.status === "Skipped");
+  const statusSelect = (id, cur) => `<select id="${id}" aria-label="Status">
+          <option value="open" ${cur === "open" ? "selected" : ""}>Not applied yet</option>
+          <option value="pipeline" ${cur === "pipeline" ? "selected" : ""}>Applied and after</option>
+          <option value="skipped" ${cur === "skipped" ? "selected" : ""}>Skipped</option>
+          <option value="all" ${cur === "all" ? "selected" : ""}>Every status</option>
+        </select>`;
+  function browseRows() {
+    const b = state.browse; const q = norm(b.q);
+    const seen = new Set(); const out = [];
+    state.rows.filter(r => postedInRange(r, b.range))
+      .filter(r => statusOk(r, b.status))
+      .filter(r => !q || norm([r.title, r.employer, r.location, r.notes, r.template].join(" ")).includes(q))
+      .sort(byScore)
+      .forEach(r => { const k = keyOf(r); if (!seen.has(k)) { seen.add(k); out.push(r); } });
+    return out;
+  }
+  function viewBrowse() {
+    const b = state.browse; const rows = browseRows();
+    const seg = (k, l) => `<button type="button" data-range="${k}" aria-pressed="${b.range === k}">${l}</button>`;
+    return `<div><p class="eyebrow">Every job the search has found, each listed once</p><h1>All jobs</h1>
+        <p class="lede">Today, Past week and Past month go by the date each job was posted. Jobs with no posting date (or only "30+ days") show under All time.</p></div>
+      <div class="section"><div class="filters">
+        <div class="seg" role="group" aria-label="Date posted">${seg("today", "Posted today")}${seg("week", "Past week")}${seg("month", "Past month")}${seg("all", "All time")}</div>
+        ${statusSelect("f-status", b.status)}
+        <input id="f-q" type="search" placeholder="Search title, employer, notes" value="${esc(b.q)}" aria-label="Search jobs">
+      </div>
+      <p class="collapsed" style="margin:0">${rows.length} ${rows.length === 1 ? "job" : "jobs"}, highest score first</p>
+      ${rows.length ? rows.map(r => card(r)).join("") : `<div class="empty">No jobs match these filters. Try a longer date range or "Every status".</div>`}</div>`;
+  }
+
+  // Matches: the same date windows as All jobs, narrowed to the score tiers you pick (the skill's bands).
+  const TIERS = [["Strong", 80, 100, "--strong"], ["Good", 60, 79, "--good"], ["Possible", 40, 59, "--possible"], ["Long shot", 20, 39, "--long"], ["Unlikely", 0, 19, "--unlikely"]];
+  const tierOf = (n) => n == null ? null : (TIERS.find(t => n >= t[1]) || TIERS[TIERS.length - 1])[0];
+  function viewMatches() {
+    const m = state.matches;
+    const pool = dedupe(state.rows.filter(r => postedInRange(r, m.range) && statusOk(r, m.status)).sort(byScore));
+    const counts = {}; TIERS.forEach(t => { counts[t[0]] = 0; }); let unscored = 0;
+    pool.forEach(r => { const t = tierOf(r.n); if (t) counts[t]++; else unscored++; });
+    const picked = TIERS.filter(t => m.tiers.includes(t[0]));
+    const shown = pool.filter(r => m.tiers.includes(tierOf(r.n)));
+    const seg = (k, l) => `<button type="button" data-mrange="${k}" aria-pressed="${m.range === k}">${l}</button>`;
+    const chip = ([name, lo, hi, v]) => `<button type="button" class="tier" data-tier="${name}" aria-pressed="${m.tiers.includes(name)}" style="--band:var(${v})">
+        <i></i><b>${name}</b><span class="rng">${lo}–${hi}</span><span class="ct">${counts[name]}</span></button>`;
+    const preset = (label, names) => { const on = names.length === m.tiers.length && names.every(n => m.tiers.includes(n));
+      return `<button type="button" class="chip" data-tierset="${names.join("|")}" aria-pressed="${on}">${label}</button>`; };
+    const groups = picked.map(([name, lo, hi]) => { const rs = shown.filter(r => tierOf(r.n) === name); if (!rs.length) return "";
+      return `<section class="section"><div class="section-head"><h2>${name} · ${lo}–${hi}<span class="stage-count">${rs.length}</span></h2><span class="collapsed">${esc(TIER_ADVICE[name])}</span></div>${rs.map(r => card(r)).join("")}</section>`; }).join("");
+    const rangeWord = { today: "posted today", week: "posted in the past week", month: "posted in the past month", all: "found so far" }[m.range];
+    return `<div><p class="eyebrow">Ranked by your chance of getting the job</p><h1>Matches</h1>
+        <p class="lede">Each score is how likely you are to get the job, based on your qualifications and the competition, not pay or location. Pick the tiers you want to see. Dates work the same as All jobs.</p></div>
+      <div class="section"><div class="filters">
+        <div class="seg" role="group" aria-label="Date posted">${seg("today", "Posted today")}${seg("week", "Past week")}${seg("month", "Past month")}${seg("all", "All time")}</div>
+        ${statusSelect("f-mstatus", m.status)}
+      </div>
+      <div class="tiers" role="group" aria-label="Score tiers">${TIERS.map(chip).join("")}</div>
+      <div class="presets"><span class="collapsed">Quick picks:</span>${preset("Worth applying (60+)", ["Strong", "Good"])}${preset("40 and up", ["Strong", "Good", "Possible"])}${preset("Every tier", TIERS.map(t => t[0]))}</div>
+      <p class="collapsed" style="margin:0">${shown.length} of ${pool.length} ${pool.length === 1 ? "job" : "jobs"} ${rangeWord}${unscored ? ` · ${unscored} without a score` : ""}</p>
+      </div>
+      ${!m.tiers.length ? `<div class="empty" style="margin-top:16px">Pick at least one tier above.</div>`
+        : shown.length ? groups : `<div class="empty" style="margin-top:16px">No ${picked.map(t => t[0].toLowerCase()).join(" or ")} jobs ${rangeWord}. Try a longer date range or add a tier.</div>`}`;
+  }
+  const TIER_ADVICE = { "Strong": "You clearly meet the bar. Apply.", "Good": "Meets the requirements, with minor gaps. Apply.",
+    "Possible": "One real gap. Worth a quick application.", "Long shot": "Several gaps. Only if it's quick.", "Unlikely": "Skip these." };
+
+  function daysSince(iso) { const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return null;
+    const d = new Date(+m[1], +m[2] - 1, +m[3]); return Math.floor((Date.now() - d) / 86400000); }
+
+  function viewInsights() {
+    const rows = state.rows;
+    const applied = rows.filter(r => isPipeline(r) || ["Rejected", "Likely ghosted"].includes(r.status));
+    const responded = applied.filter(r => RESPONDED.includes(r.status));
+    const interviews = applied.filter(r => ["Interview", "Offer"].includes(r.status));
+    const ready = rows.filter(r => r.status === "Ready to apply");
+    const weekApplied = applied.filter(r => { const d = daysSince(r.dateApplied); return d != null && d < 7; });
+    const foundWeek = rows.filter(r => inRange(r, "week"));
+
+    const waiting = rows.filter(r => ["Applied", "Acknowledged"].includes(r.status))
+      .map(r => ({ r, d: daysSince(r.dateApplied) })).sort((a, b) => (b.d ?? -1) - (a.d ?? -1));
+    const fu = waiting.map(({ r, d }) => {
+      const cls = d == null ? "" : d >= 21 ? "ghost" : d >= 7 ? "due" : "";
+      const label = d == null ? "date not set" : d >= 21 ? `${d} days · likely ghosted` : d >= 7 ? `${d} days · follow up` : `${d} ${d === 1 ? "day" : "days"}`;
+      return `<div class="r ${cls}"><span>${esc(r.title)}, ${esc(r.employer)}</span><span>${label}</span></div>`; }).join("");
+
+    const pool = rows.filter(r => r.status !== "Skipped");
+    const gaps = GAP_TERMS.map(([label, re]) => [label, pool.filter(r => re.test(cleanNotes(r.notes))).length]).filter(g => g[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const gmax = Math.max(1, ...gaps.map(g => g[1]));
+
+    const tmpl = {};
+    applied.forEach(r => { const t = TEMPLATE_NAMES[r.template] || r.template || "Not recorded";
+      tmpl[t] = tmpl[t] || { a: 0, resp: 0, int: 0 }; tmpl[t].a++; if (RESPONDED.includes(r.status)) tmpl[t].resp++; if (["Interview", "Offer"].includes(r.status)) tmpl[t].int++; });
+    const rate = applied.length ? Math.round((responded.length / applied.length) * 100) : 0;
+
+    return `<div><p class="eyebrow">How the search is going</p><h1>Insights</h1></div>
+      <div class="strip">
+        <div><span class="n">${foundWeek.length}</span><span class="l">Found this week</span></div>
+        <div><span class="n">${ready.length}</span><span class="l">Ready to apply</span></div>
+        <div><span class="n">${applied.length}</span><span class="l">Applied</span></div>
+        <div><span class="n">${interviews.length}</span><span class="l">Interviews</span></div>
+      </div>
+      <div class="grid2">
+        <section class="panel"><h2>Follow-ups</h2><p class="sub">Applications still waiting. Follow up after 7 to 10 days; after 21, count it as ghosted.</p>
+          <div class="rows">${fu || `<div class="r"><span>Nothing waiting right now.</span><span></span></div>`}</div></section>
+        <section class="panel"><h2>Most common gaps</h2><p class="sub">Requirements you're missing, counted across postings you haven't skipped. The top ones are worth learning first.</p>
+          <div class="bars">${gaps.length ? gaps.map(([l, n]) => `<div class="b"><span class="t" title="${esc(l)}">${esc(l)}</span><span class="track"><i style="width:${(n / gmax) * 100}%"></i></span><span class="v">${n}</span></div>`).join("") : `<p class="sub">No gaps recorded yet.</p>`}</div></section>
+        <section class="panel wide"><h2>Weekly review</h2>
+          <p class="sub">${weekApplied.length} applied in the last 7 days. ${applied.length ? `${responded.length} of ${applied.length} applications got any response (${rate}%).` : "No applications yet."} ${applied.length < 15 ? "Patterns get meaningful after about 15 applications." : ""}</p>
+          <div class="tablewrap"><table><thead><tr><th>Template</th><th class="num">Applied</th><th class="num">Responses</th><th class="num">Interviews</th></tr></thead>
+          <tbody>${Object.keys(tmpl).length ? Object.entries(tmpl).sort((a, b) => b[1].a - a[1].a).map(([t, v]) => `<tr><td>${esc(t)}</td><td class="num">${v.a}</td><td class="num">${v.resp}</td><td class="num">${v.int}</td></tr>`).join("") : `<tr><td colspan="4">No applications yet.</td></tr>`}</tbody></table></div>
+        </section>
+      </div>`;
+  }
+
+  // ---------- render ----------
+  function render() {
+    const tab = state.view === "app" ? state.back : state.view;
+    document.querySelectorAll("nav.tabs a").forEach(a => { if (a.dataset.view === tab) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+    $("#dot").classList.toggle("live", state.loaded && !state.error);
+    $("#syncText").textContent = state.error && !state.loaded ? "Not connected" : state.loaded ? `Synced ${fmtTime(state.syncedAt)}${state.error ? " · last refresh failed" : ""}` : "Connecting to your Job Tracker…";
+    if (state.loaded) {
+      $("#c-latest").textContent = latestBatch().rows.filter(r => r.status !== "Skipped").length || "";
+      $("#c-browse").textContent = new Set(state.rows.map(keyOf)).size;
+      $("#c-matches").textContent = dedupe(state.rows.filter(r => isOpen(r) && r.n >= 60)).length || "";
+      $("#c-applied").textContent = dedupe(state.rows.filter(isApplied)).length || "";
+      $("#c-waiting").textContent = dedupe(state.rows.filter(isWaiting)).length || "";
+    }
+    const main = $("#main");
+    const fq = document.activeElement && document.activeElement.id === "f-q" ? document.activeElement.selectionStart : null;
+    const ae = document.activeElement;
+    const focus = ae && ae.tagName === "TEXTAREA" && ae.id ? { id: ae.id, a: ae.selectionStart, b: ae.selectionEnd } : null;
+    let html = "";
+    if (state.error && !state.loaded) html = `<div class="notice error"><b>Can't read your Job Tracker.</b> ${esc(errorCopy(state.error, S_SHEETS))}</div>`;
+    else if (!state.loaded) html = `<div class="section"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>`;
+    else {
+      if (state.error) html += `<div class="notice error" style="margin-bottom:16px">${esc(errorCopy(state.error, S_SHEETS))} Showing the data from ${fmtTime(state.syncedAt)}.</div>`;
+      html += state.view === "app" ? viewApp() : state.view === "browse" ? viewBrowse() : state.view === "matches" ? viewMatches() : state.view === "applied" ? viewApplied()
+        : state.view === "waiting" ? viewWaiting() : state.view === "insights" ? viewInsights() : viewLatest();
+    }
+    main.innerHTML = html;
+    if (fq != null) { const i = $("#f-q"); if (i) { i.focus(); try { i.setSelectionRange(fq, fq); } catch (e) {} } }
+    if (focus && focus.id) { const el = document.getElementById(focus.id); if (el && !el.disabled) { el.focus(); try { el.setSelectionRange(focus.a, focus.b); } catch (e) {} } }
+    afterRender();
+  }
+
+  // On the application page: fetch previews, and poll the sheet every 30 s while Claude is working.
+  let pollTimer = null;
+  function afterRender() {
+    const r = state.view === "app" && state.loaded ? state.rows.find(x => x.row === state.appRow) : null;
+    if (r && r.has) { ensurePreview(r, "resume"); ensurePreview(r, "cover"); }
+    const busy = !!(r && (r.tailoring || r.revising));
+    if (busy && !pollTimer) pollTimer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+    if (!busy && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function route() {
+    const h = (location.hash || "").slice(1);
+    const m = h.match(/^app\/(\d+)$/);
+    state.zoom = null;
+    if (m) { state.view = "app"; state.appRow = +m[1]; window.scrollTo(0, 0); }
+    else { state.view = ["latest", "browse", "matches", "applied", "waiting", "insights"].includes(h) ? h : "latest"; state.back = state.view; }
+    render();
+  }
+  window.addEventListener("hashchange", route);
+
+  // ---------- events ----------
+  const findRow = (n) => state.rows.find(r => r.row === +n);
+  document.addEventListener("click", (e) => {
+    const z = e.target.closest("[data-zoom], [data-zoom-close]");
+    if (z) { state.zoom = z.dataset.zoom || null; render(); return; }
+    const t = e.target.closest("button, [data-expand]"); if (!t) return;
+    if (t.matches("[data-expand]")) { t.classList.toggle("clamp"); return; }
+    if (t.id === "refresh") { refresh(); return; }
+    if (t.dataset.create) { const r = findRow(t.dataset.create); if (r) { location.hash = "#app/" + r.row; createDocs(r); } return; }
+    if (t.dataset.go) { const r = findRow(t.dataset.go); if (r) createDocs(r); return; }
+    if (t.dataset.fresh) { const r = findRow(t.dataset.fresh); if (r) freshen(r, state.drafts[r.row]); return; }
+    if (t.dataset.suggest) { const n = t.dataset.for; const cur = (state.drafts[n] || "").trim();
+      state.drafts[n] = cur ? `${cur}${/[.!?]$/.test(cur) ? "" : "."} ${t.dataset.suggest}.` : `${t.dataset.suggest}.`; render();
+      const ta = document.getElementById("fresh-" + n); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } return; }
+    if (t.dataset.status) { const r = findRow(t.dataset.row); if (r) setStatus(r, t.dataset.status); return; }
+    if (t.dataset.dl) { const r = findRow(t.dataset.row); if (r) downloadPdf(r, t.dataset.dl, t.dataset.name, t); return; }
+    if (t.dataset.mail) { const r = findRow(t.dataset.mail); if (r) checkMail(r); return; }
+    if (t.dataset.range) { state.browse.range = t.dataset.range; render(); return; }
+    if (t.dataset.mrange) { state.matches.range = t.dataset.mrange; render(); return; }
+    if (t.dataset.tier) { const n = t.dataset.tier, cur = state.matches.tiers;
+      state.matches.tiers = cur.includes(n) ? cur.filter(x => x !== n) : TIERS.map(x => x[0]).filter(x => x === n || cur.includes(x)); saveTiers(); render(); return; }
+    if (t.dataset.tierset) { state.matches.tiers = t.dataset.tierset.split("|"); saveTiers(); render(); return; }
+  });
+  document.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.id === "f-status") { state.browse.status = t.value; render(); }
+    if (t.id === "f-mstatus") { state.matches.status = t.value; render(); }
+    if (t.dataset.move && t.value) { const r = findRow(t.dataset.move); if (r) setStatus(r, t.value); }
+  });
+  document.addEventListener("input", (e) => {
+    if (e.target.id === "f-q") { state.browse.q = e.target.value; clearTimeout(render._q); render._q = setTimeout(render, 150); }
+    if (e.target.dataset && e.target.dataset.draft) state.drafts[e.target.dataset.draft] = e.target.value;
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.zoom) { state.zoom = null; render(); return; }
+    const t = e.target; if (!(t.dataset && t.dataset.draft) || e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+    e.preventDefault(); const r = findRow(t.dataset.draft); if (r) freshen(r, t.value);
+  });
+
+  // ---------- boot ----------
+  if (CFG.brand) { $("#brandName").textContent = CFG.brand; $("#brandTag").textContent = CFG.tagline || ""; }
+  route();
+  (async () => {
+    const c = window.claude;
+    if (!c || !c.use) { state.error = { code: "not_granted" }; render(); return; }
+    [mcp, downloads] = await Promise.all([c.use("mcp"), c.use("downloads")]);
+    if (!mcp) { state.error = { code: "not_granted" }; render(); return; }
+    startWatch();
+  })();
+})();
+</script>
+</body>
+</html>

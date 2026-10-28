@@ -1,0 +1,12 @@
+{
+  "name": "job-search-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI agent pipeline that searches for jobs every hour, scores how likely you are to get each one, and tracks applications on a web dashboard.",
+  "scripts": {
+    "pdf": "node pdf/resume_pdf.js templates/line-cook.json out"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1"
+  }
+}
