@@ -1,6 +1,7 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
+<script>try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Job Search Agent · Demo</title>
@@ -251,6 +252,7 @@ th.num { text-align: right; }
 .demo-bar { background: var(--warn-soft); color: var(--warn-ink); font-size: 13.5px; }
 .demo-bar .wrap { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; padding-block: 8px; }
 .demo-bar a { color: inherit; font-weight: 600; }
+#themeBtn { font-size: 12.5px; padding: 5px 10px; }
 </style>
 </head>
 <body>
@@ -260,7 +262,7 @@ th.num { text-align: right; }
 <header class="top">
   <div class="wrap">
     <div class="brand"><b id="brandName">Job Search Agent</b><span id="brandTag">Demo with sample data</span></div>
-    <div class="sync" id="sync"><span><i class="dot" id="dot"></i><span id="syncText">Connecting to your Job Tracker…</span></span><button class="btn quiet" id="refresh" type="button">Refresh</button></div>
+    <div class="sync" id="sync"><span><i class="dot" id="dot"></i><span id="syncText">Connecting to your Job Tracker…</span></span><button class="btn quiet" id="refresh" type="button">Refresh</button><button class="btn" id="themeBtn" type="button" aria-pressed="false">Light mode</button></div>
     <nav class="tabs" aria-label="Views">
       <a href="#latest" data-view="latest">Latest<span class="count" id="c-latest"></span></a>
       <a href="#browse" data-view="browse">All jobs<span class="count" id="c-browse"></span></a>
@@ -1120,6 +1122,16 @@ th.num { text-align: right; }
     const t = e.target; if (!(t.dataset && t.dataset.draft) || e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
     e.preventDefault(); const r = findRow(t.dataset.draft); if (r) freshen(r, t.value);
   });
+
+  // ---------- theme ----------
+  const themeBtn = $("#themeBtn");
+  function syncTheme() { const light = document.documentElement.dataset.theme === "light";
+    themeBtn.textContent = light ? "Dark mode" : "Light mode"; themeBtn.setAttribute("aria-pressed", String(light)); }
+  themeBtn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next; try { localStorage.setItem("theme", next); } catch (e) {} syncTheme();
+  });
+  syncTheme();
 
   // ---------- boot ----------
   if (CFG.brand) { $("#brandName").textContent = CFG.brand; $("#brandTag").textContent = CFG.tagline || ""; }
