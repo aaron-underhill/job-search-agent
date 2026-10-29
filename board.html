@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Job Board</title>
+<style>
+:root{font:15px system-ui,sans-serif;color-scheme:dark;background:#0e1416;color:#e5ece9}*{box-sizing:border-box}body{margin:0}header{padding:18px 4%;border-bottom:1px solid #34413f;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}main{max-width:1080px;margin:auto;padding:24px 16px}h1{font-size:22px;margin:0}h2{font-size:18px}.sub,.muted{color:#a4b4b0}.panel,.job{background:#182528;border:1px solid #34413f;border-radius:12px;padding:17px;margin:12px 0}input,button,select{font:inherit;border:1px solid #62736f;border-radius:8px;padding:10px;background:#102022;color:#e5ece9}input{max-width:100%;width:100%}button{cursor:pointer}button.primary{background:#5cc39c;color:#08201a;border-color:#5cc39c;font-weight:700}button:disabled{opacity:.5;cursor:wait}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>*{flex:0 1 auto}.row input{flex:1 1 230px}a{color:#8fd9b8}.hidden{display:none!important}.job h3{margin:0 0 6px}.job p{margin:8px 0}.message{padding:10px 12px;background:#293a3a;border-radius:7px}.danger{color:#ffab9b}label{display:block;margin-bottom:5px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.tag{font-size:12px;padding:3px 8px;border:1px solid #657a74;border-radius:20px}.job-actions{margin-top:12px}#jobs{min-height:40px}small{color:#9cafaa}
+</style></head>
+<body>
+<header><div><h1>My Job Board</h1><small>Private listings · Powered by Supabase</small></div><div class="row"><a href="/">Public demo</a><span id="who"></span><button id="logout" class="hidden">Sign out</button></div></header>
+<main>
+<div id="notice" role="status" aria-live="polite"></div>
+<section id="login" class="panel hidden"><h2>Sign in to your private board</h2><p class="sub">We'll email you a one-time sign-in link.</p><form id="login-form" class="row"><input id="email" type="email" placeholder="Your email address" autocomplete="email" required><button class="primary">Send sign-in link</button></form></section>
+<section id="private" class="hidden">
+<div class="row"><div style="flex:1"><h2>Saved listings <span id="count">0</span></h2><p class="sub">Import real jobs from your Google Sheet or add one manually.</p></div><button id="reload">Refresh</button></div>
+<div class="panel"><h2>Import spreadsheet</h2><p class="sub">Download the Jobs tab as CSV from Google Sheets, then import it here. Exact job URLs are deduplicated.</p><input type="file" id="csv" accept=".csv,text/csv"><p><small>Expected columns: Job title, Employer, Link, Location, Pay, Score, Posted, Source, Status, Notes.</small></p></div>
+<details class="panel"><summary><strong>Add a listing</strong></summary><form id="add-form"><div class="grid"><div><label>Title <input name="title" required></label></div><div><label>Employer <input name="employer" required></label></div><div><label>Job URL <input name="url" type="url" required></label></div><div><label>Location <input name="location"></label></div><div><label>Pay <input name="pay"></label></div><div><label>Fit score <input name="score" type="number" min="0" max="100"></label></div></div><button class="primary">Save listing</button></form></details>
+<div class="row"><input id="filter" placeholder="Filter by title, employer, location..."><select id="status-filter"><option value="">All statuses</option><option>Found</option><option>Ready to apply</option><option>Applied</option><option>Interview</option><option>Rejected</option><option>Offer</option></select></div>
+<div id="jobs"></div>
+</section>
+</main>
+<script type="module">
+import {createClient} from "https://esm.sh/@supabase/supabase-js@2";
+const $=id=>document.getElementById(id);
+const notice=(message,error=false)=>{const p=document.createElement("p");p.className="message"+(error?" danger":"");p.textContent=message;$("notice").replaceChildren(p)};
+let client,viewer,records=[];
+try{
+ const response=await fetch("/api/public-config",{cache:"no-store"});
+ if(!response.ok)throw new Error("Supabase not configured. Add Vercel environment variables and redeploy.");
+ const conf=await response.json();
+ client=createClient(conf.supabaseUrl,conf.supabasePublishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+ const session=await client.auth.getSession();
+ await setSession(session.data.session);
+ client.auth.onAuthStateChange((_event,session)=>{void setSession(session)});
+}catch(e){notice(e.message||"Could not initialize Supabase",true)}
+async function setSession(session){
+ viewer=session?.user||null;
+ $("login").classList.toggle("hidden",!!viewer);$("private").classList.toggle("hidden",!viewer);
+ $("logout").classList.toggle("hidden",!viewer);
+ $("who").textContent=viewer?.email||"";
+ if(viewer)await load();else{records=[];render()}
+}
+$("login-form").addEventListener("submit",async e=>{
+ e.preventDefault();
+ const email=$("email").value.trim();
+ const button=e.submitter;button.disabled=true;
+ try{
+ const {error}=await client.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+"/board.html",shouldCreateUser:true}});
+ if(error)throw error;notice("Check your inbox for a sign-in link.");
+ }catch(err){notice(err.message,true)}finally{button.disabled=false}
+});
+$("logout").onclick=async()=>{await client.auth.signOut();notice("Signed out.")};
+$("reload").onclick=()=>load();
+$("filter").oninput=render;$("status-filter").onchange=render;
+async function load(){
+ const {data,error}=await client.from("jobs").select("*").order("discovered_at",{ascending:false}).limit(1000);
+ if(error){notice("Could not load listings: "+error.message,true);return}
+ records=data||[];render();
+}
+function el(tag,text,className){const x=document.createElement(tag);if(text!=null)x.textContent=String(text);if(className)x.className=className;return x}
+function render(){
+ const container=$("jobs");container.replaceChildren();
+ const q=$("filter").value.toLowerCase(),status=$("status-filter").value;
+ const filtered=records.filter(j=>(!status||j.status===status)&&[j.title,j.employer,j.location,j.notes].some(t=>String(t||"").toLowerCase().includes(q)));
+ $("count").textContent=String(records.length);
+ if(!filtered.length){container.append(el("p",records.length?"No matches for those filters.":"No saved jobs yet. Import your Google Sheet or add a listing.","sub"));return}
+ for(const job of filtered){
+  const card=el("article",null,"job");
+  const title=el("h3",job.title);card.append(title);
+  card.append(el("p",[job.employer,job.location,job.pay].filter(Boolean).join(" · "),"sub"));
+  const info=el("div",null,"row");
+  if(job.score!=null)info.append(el("span","Fit "+job.score+"/100","tag"));
+  info.append(el("span",job.status||"Found","tag"));
+  if(job.posted_at)info.append(el("span","Posted "+job.posted_at,"tag"));
+  card.append(info);
+  if(job.notes)card.append(el("p",job.notes));
+  const actions=el("div",null,"row job-actions");
+  const link=el("a","Open job posting");link.href=job.url;link.target="_blank";link.rel="noopener noreferrer";actions.append(link);
+  const sel=el("select");for(const s of ["Found","Ready to apply","Applied","Interview","Rejected","Offer"]){const o=el("option",s);o.value=s;sel.append(o)}
+  sel.value=job.status||"Found";sel.setAttribute("aria-label","Change status for "+job.title);
+  sel.onchange=async()=>{const {error}=await client.from("jobs").update({status:sel.value,updated_at:new Date().toISOString()}).eq("id",job.id);if(error)notice(error.message,true);else{job.status=sel.value;render()}};actions.append(sel);card.append(actions);container.append(card);
+ }
+}
+function validUrl(value){try{const u=new URL(value);if(!["https:","http:"].includes(u.protocol)||!u.hostname||u.username||u.password)throw Error();u.hash="";return u.toString()}catch{throw new Error("Each listing needs a valid http(s) job URL")}}
+function scoreValue(v){const s=String(v??"").trim();if(!s)return null;const n=Number(s);if(!Number.isInteger(n)||n<0||n>100)throw Error("Invalid score: "+s);return n}
+async function saveJobs(jobs){
+ if(!jobs.length){notice("No valid job rows found.",true);return}
+ const {error}=await client.from("jobs").upsert(jobs.map(j=>({...j,owner_id:viewer.id})),{onConflict:"owner_id,url"});
+ if(error)throw error;
+ notice("Saved "+jobs.length+" listings to your private board.");await load();
+}
+$("add-form").onsubmit=async e=>{
+ e.preventDefault();const form=new FormData(e.target);
+ try{await saveJobs([{title:String(form.get("title")).trim(),employer:String(form.get("employer")).trim(),url:validUrl(String(form.get("url"))),location:String(form.get("location")||""),pay:String(form.get("pay")||""),score:scoreValue(form.get("score"))}]);e.target.reset()}
+ catch(error){notice(error.message,true)}
+};
+// CSV reader supporting quoted commas, double quotes and newlines.
+function parseCsv(text){
+ const rows=[];let row=[],field="",quoted=false;
+ for(let i=0;i<text.length;i++){const ch=text[i];
+  if(quoted){if(ch==='"'&&text[i+1]==='"'){field+='"';i++}else if(ch==='"')quoted=false;else field+=ch}
+  else if(ch==='"')quoted=true;
+  else if(ch===","){row.push(field);field=""}
+  else if(ch==="\n"||ch==="\r"){if(ch==="\r"&&text[i+1]==="\n")i++;row.push(field);if(row.some(x=>x!==""))rows.push(row);row=[];field=""}
+  else field+=ch;
+ }
+ if(quoted)throw Error("CSV has an unclosed quoted field");
+ row.push(field);if(row.some(x=>x!==""))rows.push(row);return rows;
+}
+$("csv").onchange=async e=>{
+ const file=e.target.files?.[0];if(!file)return;
+ if(file.size>5_000_000){notice("CSV is larger than 5 MB; split it first.",true);return}
+ try{
+  const rows=parseCsv((await file.text()).replace(/^\ufeff/,""));const header=rows.shift()?.map(x=>x.trim().toLowerCase())||[];
+  const idx=(...keys)=>keys.map(k=>header.indexOf(k.toLowerCase())).find(i=>i>=0);
+  const get=(row,...keys)=>{const i=idx(...keys);return i==null?"":String(row[i]||"").trim()};
+  if(idx("job title","title")==null||idx("employer","company")==null||idx("link","url")==null)throw Error("CSV needs Job title, Employer, and Link columns");
+  const jobs=[];let skipped=0;
+  for(const row of rows){
+   try {
+    const title=get(row,"job title","title"),employer=get(row,"employer","company"),url=validUrl(get(row,"link","url"));
+    if(!title||!employer){skipped++;continue}
+    jobs.push({title,employer,url,location:get(row,"location"),pay:get(row,"pay"),score:scoreValue(get(row,"score")),posted_at:get(row,"posted"),source:get(row,"source"),status:get(row,"status")||"Found",notes:get(row,"notes")});
+   }catch{skipped++}
+  }
+  // Batch import to avoid oversized API requests.
+  for(let i=0;i<jobs.length;i+=100)await saveJobs(jobs.slice(i,i+100));
+  notice("Imported "+jobs.length+" jobs. Skipped "+skipped+" incomplete/invalid rows.");
+ }catch(error){notice("Import failed: "+error.message,true)}
+ finally{e.target.value=""}
+};
+</script></body></html>
