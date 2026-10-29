@@ -62,7 +62,8 @@
         parts.forEach(p => { if (p === "") return; if (/^ +$/.test(p)) { if (words.length) words[words.length - 1].sp = p.length; return; } words.push({ t: p, b: r.b, hl: r.hl, sp: 0 }); });
       });
       const font = (w) => italic ? F.i : w.b ? F.b : F.r;
-      const wid = (w) => font(w).widthOfTextAtSize(w.t, size);
+      // Measure glyph by glyph: pdf-lib's widthOfTextAtSize applies kerning, but drawText doesn't, so whole-string widths come out short.
+      const wid = (w) => { const f = font(w); let t = 0; for (const ch of w.t) t += f.widthOfTextAtSize(ch, size); return t; };
       const spw = (w) => font(w).widthOfTextAtSize(" ", size) * (w.sp || 0); // sp = spaces after this word (0 = glued to the next)
       const lines = []; let cur = [], cw = 0;
       words.forEach(w => {
