@@ -93,7 +93,11 @@ node pdf/resume_pdf.js templates/line-cook.json out/
 
 ## How I built it
 
-I designed the system: the agents and what each one is responsible for, the scoring rubric and filters, the truth rules, the data flow through Google Sheets, and every page of the dashboard. I built it with Claude, Anthropic's AI, which wrote most of the code while I directed, reviewed and tested it. The agents run as Claude scheduled tasks; I didn't write the agent loop itself. My work was deciding what each agent does, what tools it gets, what rules it follows and how the pieces hand off to each other.
+I designed the system: the agents and what each one is responsible for, the scoring rubric and filters, the truth rules, the data flow through Google Sheets, and every page of the dashboard. I initially built it with Claude, Anthropic's AI, which wrote most of the code while I directed, reviewed and tested it. I am now extending the project with ChatGPT and OpenAI tooling, beginning with a Vercel deployment foundation and a plan for provider-independent backend agents. The agents run as Claude scheduled tasks; I didn't write the agent loop itself. My work was deciding what each agent does, what tools it gets, what rules it follows and how the pieces hand off to each other.
+
+## Deploying the demo and planning the private app
+
+The existing GitHub Pages site is a fictional demo, not the personal production dashboard. See [deployment instructions and security roadmap](docs/DEPLOYMENT.md) for Vercel setup and the remaining steps to implement a private OpenAI-backed service.
 
 ## Demo vs. live
 
