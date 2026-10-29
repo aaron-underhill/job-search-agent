@@ -4,7 +4,8 @@
   "private": true,
   "description": "AI agent pipeline that searches for jobs every hour, scores how likely you are to get each one, and tracks applications on a web dashboard.",
   "scripts": {
-    "pdf": "node pdf/resume_pdf.js templates/line-cook.json out"
+    "pdf": "node pdf/resume_pdf.js templates/line-cook.json out",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "pdf-lib": "1.17.1"
